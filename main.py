@@ -1,8 +1,5 @@
 import string
-import uuid
-
 import requests
-
 import comments
 import config
 import random
@@ -223,25 +220,24 @@ async def payBalance1(ans: Message):
 
 @bot.branch.simple_branch('Balance')
 async def payBalance2(ans: Message):
+    if ans.text.lower() == 'меню':
+        await bot.branch.exit(ans.peer_id)
+        await menu()
     if ans.text.isdigit() and int(ans.text) >= 10:
         await ans(
-            f'Ты хочешь пополнить свой баланс на {ans.text} руб.\n'
+            f'Ты хочешь пополнить свой баланс на {ans.text} руб?\n'
             f'Если ты передумал, то введи число заново.',
             keyboard=keyboard_gen(
                 [
                     [{'text': 'Меню', 'color': 'negative'}, {'text': 'Далее', 'color': 'positive'}]
                 ],
-                inline=True,
-                one_time=False,
+                inline=True
             ),
             random_id=random_gen()
         )
         await bot.branch.exit(ans.peer_id)
         await bot.branch.add(ans.peer_id, 'payBalance', amount=int(ans.text))
-    if ans.text.lower() == 'меню':
-        await bot.branch.exit(ans.peer_id)
-        await menu()
-    if not ans.text.isdigit() and not int(ans.text) >= 10:
+    else:
         await ans(
             f'Неверный формат ввода данных.\n'
             f'Вот тебе совет:\n'
@@ -256,15 +252,53 @@ async def payBalance2(ans: Message):
 
 @bot.branch.simple_branch('payBalance')
 async def payBalance3(ans: Message, amount):
-    if ans.text.lower() == 'далее':
-        billId = lambda: ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(10))
-        amount = amount
-        await ans(
-            f'Твое число {amount}\nBillId: {billId()}'
-        )
+    bill = False
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    await cursor.execute(f"""CREATE TABLE IF NOT EXISTS transaction_{ans.peer_id} (bill	INTEGER, billId	TEXT)""")
+    await conn.commit()
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
+    elif ans.text.lower() == 'отменить':
+        pass
+    elif ans.text.lower() == 'далее':
+        bill = True
+        billId = lambda: ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(10))
+        amount = amount
+        comment = comments.random_comment()
+        payUrl = await qiwi.payBalance(
+            billId(),
+            amount,
+            f'Счет для пополнения баланса.\n'
+            f'Комментарий к оплате: {comment}'
+        )
+        shortUrl = requests.get('https://clck.ru/--?url=' + payUrl).text
+        await ans(
+            f'Составлен счет для пополнения баланса.\nПерейди по ссылке {shortUrl}'
+            f' и пополни счет, потом возвращайся сюда, чтобы нажать на кнопку «Проверить».'
+            f'\nИ да. Не забудь сверить комментарий к оплате. Для тебя он вот: {comment}.',
+            keyboard=keyboard_gen(
+                [
+                    [{'text': 'Отменить', 'color': 'negative'}, {'text': 'Проверить', 'color': 'positive'}]
+                ],
+                inline=True
+            )
+        )
+    else:
+        if not bill:
+            await payBalance2(ans)
+        else:
+            await ans(
+                f'Что такое этот ваш {ans.text}?\n'
+                f'Я тебя не понял.\nНиже я прикрепил кнопки, на которые я точно тебе отвечу.',
+                keyboard=keyboard_gen(
+                    [
+                        [{'text': 'Отменить', 'color': 'negative'}, {'text': 'Проверить', 'color': 'positive'}]
+                    ],
+                    inline=True
+                )
+            )
 
 
 @bot.on.message_handler(text='добавить/изменить номер', lower=True)
