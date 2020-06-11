@@ -1,3 +1,4 @@
+import asyncio
 import string
 import requests
 import comments
@@ -74,7 +75,7 @@ async def editProfile(user_id, value, column):
     await cursor.close()
 
 
-async def balance(user_id, act, amount):
+async def balanceManipulation(user_id, act, amount):
     conn = await aiosqlite.connect('Database/datebase.db')
     cursor = await conn.cursor()
     if act == 'pay':
@@ -85,6 +86,49 @@ async def balance(user_id, act, amount):
         await cursor.execute(f'UPDATE Users SET balance=balance-{amount} WHERE user_id = {user_id}')
         await conn.commit()
         await cursor.close()
+
+
+async def checkTable(tableName):
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    await cursor.execute(f'SELECT count(*) FROM sqlite_master WHERE type=\'table\' AND name=\'{tableName}\'')
+    res = await cursor.fetchone()
+    await cursor.close()
+    return bool(res[0])
+
+
+async def createTable(tableName):
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    await cursor.execute(f'CREATE TABLE IF NOT EXISTS {tableName} '
+                         f'(billId	TEXT)')
+
+
+async def forTransaction(tableName, act, billId=None):
+    """
+    Добавляет значение billId, чтобы в дальнейшем пользователь смог проверять состояние своего платежа,
+    а так же отменять счет.
+    :param act: Что нужно сделать с помощью этой функции. Доступные аргументы: insert, pull
+    :param tableName: Название таблицы с транзакцией
+    :param billId: id счета
+    :return Может вернуть последний billId, если в act указано pull
+    """
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    if act == 'insert':
+        await cursor.execute(f'INSERT INTO \'{tableName}\'(billId) VALUES (?)', (billId,))
+        await conn.commit()
+    elif act == 'pull':
+        await cursor.execute(f'SELECT * FROM \'{tableName}\'')
+        res = await cursor.fetchall()
+        await cursor.close()
+        return res[-1][0]
+
+
+async def deleteTable(tableName):
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    await cursor.execute(f'DROP TABLE IF EXISTS {tableName}')
 
 
 async def create_keyboard(text=None, user_id=None):
@@ -252,18 +296,39 @@ async def payBalance2(ans: Message):
 
 @bot.branch.simple_branch('payBalance')
 async def payBalance3(ans: Message, amount):
-    bill = False
-    conn = await aiosqlite.connect('Database/database.db')
-    cursor = await conn.cursor()
-    await cursor.execute(f"""CREATE TABLE IF NOT EXISTS transaction_{ans.peer_id} (bill	INTEGER, billId	TEXT)""")
-    await conn.commit()
+    tableName = f'transaction_{ans.peer_id}'
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
     elif ans.text.lower() == 'отменить':
+        await qiwi.reject(await forTransaction(tableName, 'pull'))
+        await ans(
+            'Счет отменен.\n'
+            'Предыдущая ссылка теперь больше недоступна.'
+        )
+        await ans('Произвожу выход в меню.')
+        await bot.branch.exit(ans.peer_id)
+        await asyncio.sleep(1)
+        # TODO: Стоит это место исправить.
+        await ans(
+            'Главное меню.\nВыбери интересующий тебя раздел.',
+            keyboard=keyboard_gen(
+                [
+                    [{'text': 'Активные розыгрыши', 'color': 'primary'}],
+                    [{'text': 'Прошедшие розыгрыши', 'color': 'primary'}],
+                    [{'text': 'Профиль', 'color': 'secondary'}],
+                    [{'text': 'Связаться', 'color': 'secondary'}],
+                    [{'text': 'Помощь', 'color': 'negative'}]
+                ],
+                one_time=True,
+                inline=False
+            ),
+            random_id=random_gen()
+        )
+    elif ans.text.lower() == 'проверить':
         pass
     elif ans.text.lower() == 'далее':
-        bill = True
+        await createTable(tableName)
         billId = lambda: ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(10))
         amount = amount
         comment = comments.random_comment()
@@ -274,6 +339,7 @@ async def payBalance3(ans: Message, amount):
             f'Комментарий к оплате: {comment}'
         )
         shortUrl = requests.get('https://clck.ru/--?url=' + payUrl).text
+        await forTransaction(tableName, 'insert', billId())
         await ans(
             f'Составлен счет для пополнения баланса.\nПерейди по ссылке {shortUrl}'
             f' и пополни счет, потом возвращайся сюда, чтобы нажать на кнопку «Проверить».'
@@ -286,9 +352,9 @@ async def payBalance3(ans: Message, amount):
             )
         )
     else:
-        if not bill:
+        if not await checkTable(tableName):
             await payBalance2(ans)
-        else:
+        if await checkTable(tableName):
             await ans(
                 f'Что такое этот ваш {ans.text}?\n'
                 f'Я тебя не понял.\nНиже я прикрепил кнопки, на которые я точно тебе отвечу.',
