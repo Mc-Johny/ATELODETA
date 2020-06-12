@@ -199,14 +199,12 @@ async def message(ans: Message):
     if ans.payload == '{\"command\":\"start\"}':
         await ans(
             random.choice(messages.greeting),
-            keyboard=await create_keyboard('help'),
-            random_id=random_gen()
+            keyboard=await create_keyboard('help')
         )
     await check_or_register_user(ans.from_id)
     await ans(
         'Я тебя не понял.\nВозвращайся лучше в меню.',
-        keyboard=await create_keyboard('to_menu'),
-        random_id=random_gen()
+        keyboard=await create_keyboard('to_menu')
     )
 
 
@@ -214,8 +212,7 @@ async def message(ans: Message):
 async def help_hendler(ans: Message):
     await ans(
         random.choice(messages.helping),
-        keyboard=await create_keyboard('to_menu'),
-        random_id=random_gen()
+        keyboard=await create_keyboard('to_menu')
     )
 
 
@@ -223,8 +220,7 @@ async def help_hendler(ans: Message):
 async def menu(ans: Message):
     await ans(
         'Главное меню.\nВыбери интересующий тебя раздел.',
-        keyboard=await create_keyboard(ans.text.lower(), ans.from_id),
-        random_id=random_gen()
+        keyboard=await create_keyboard(ans.text.lower(), ans.from_id)
     )
 
 
@@ -249,8 +245,7 @@ async def profile(ans: Message):
         '\nКуплено тикетов за все время: ' + str(buy_ticket) +
         '\n Номер кошелька QIWI: +' + str(qiwi_number) +
         '\nПобед за все время: ' + str(wins) + str_qiwi,
-        keyboard=await create_keyboard(ans.text.lower(), ans.from_id),
-        random_id=random_gen()
+        keyboard=await create_keyboard(ans.text.lower(), ans.from_id)
     )
 
 
@@ -259,8 +254,7 @@ async def payBalance1(ans: Message):
     await ans(
         'Введи сумму пополнения(целое число).'
         '\nМинимальная сумма пополнения 10 руб.',
-        keyboard=await create_keyboard('to_menu'),
-        random_id=random_gen()
+        keyboard=await create_keyboard('to_menu')
     )
     await bot.branch.add(ans.peer_id, 'Balance')
 
@@ -279,8 +273,7 @@ async def payBalance2(ans: Message):
                     [{'text': 'Меню', 'color': 'negative'}, {'text': 'Далее', 'color': 'positive'}]
                 ],
                 inline=True
-            ),
-            random_id=random_gen()
+            )
         )
         await bot.branch.exit(ans.peer_id)
         await bot.branch.add(ans.peer_id, 'payBalance', amount=int(ans.text))
@@ -292,8 +285,7 @@ async def payBalance2(ans: Message):
             f'  •Число должно быть целым и без всяких знаков\n'
             f'  •Число должно быть больше 10\n'
             f'Надеюсь, что ты сейчас введешь правильное число.',
-            keyboard=await create_keyboard('to_menu'),
-            random_id=random_gen()
+            keyboard=await create_keyboard('to_menu')
         )
 
 
@@ -326,8 +318,7 @@ async def payBalance3(ans: Message, amount):
                 ],
                 one_time=True,
                 inline=False
-            ),
-            random_id=random_gen()
+            )
         )
     elif ans.text.lower() == 'проверить':
         billId, _ = await forTransaction(tableName, 'pull')
@@ -398,8 +389,7 @@ async def editNumber(ans: Message):
         'Напиши свой номер из QIWI кошелька(номер телефона, зарегистрированный в QIWI), куда придут '
         'деньги в случае твоей победы.\nНомер должен начинаться с 7, не должен иметь никаких знаков, '
         'длина 11 цифр.\nПример: 7900500333123',
-        keyboard=await create_keyboard('edit'),
-        random_id=random_gen()
+        keyboard=await create_keyboard('edit')
     )
     await bot.branch.add(ans.peer_id, 'editNumber')
 
@@ -410,16 +400,14 @@ async def branchEditNumber(ans: Message):
         await editProfile(ans.from_id, ans.text, 'qiwi_number')
         await ans(
             'Номер успешно привязан!\nТеперь можешь обратно вернуться в свой профиль.',
-            keyboard=await create_keyboard('edit'),
-            random_id=random_gen()
+            keyboard=await create_keyboard('edit')
         )
         await bot.branch.exit(ans.peer_id)
 
     else:
         await ans(
             'Номер невалидный!\nНомер должен:\n•Содержать только цифры и начинаться на 7(без +)\n•Длина 11 цифр.',
-            keyboard=await create_keyboard('edit'),
-            random_id=random_gen()
+            keyboard=await create_keyboard('edit')
         )
 
     if ans.text.lower() == 'меню':
@@ -438,8 +426,7 @@ async def editNickname(ans: Message):
         'Не стоит выпендриваться со всяческими символами и шрифтами(𝑒𝓍𝒶𝓂𝓅𝓁𝑒 - плохой пример).\nНе у всех есть поддержка'
         ' подобных шрифтов и символов. Чем проще, тем лучше.\nЕсли не можешь придумать себе ник, то воспользуйся'
         ' сайтом https://nick-name.ru/ru/generate\nДействуй!',
-        keyboard=await create_keyboard('edit'),
-        random_id=random_gen()
+        keyboard=await create_keyboard('edit')
     )
     await bot.branch.add(ans.peer_id, 'editNickname')
 
@@ -449,8 +436,7 @@ async def branchEditNickname(ans: Message):
     await editProfile(ans.from_id, ans.text, 'nickname')
     await ans(
         'Ваш никнейм успешно сменен!\nТеперь можешь обратно вернуться в свой профиль.',
-        keyboard=await create_keyboard('edit'),
-        random_id=random_gen()
+        keyboard=await create_keyboard('edit')
     )
     await bot.branch.exit(ans.peer_id)
     if ans.text.lower() == 'меню':
@@ -460,6 +446,17 @@ async def branchEditNickname(ans: Message):
     if ans.text.lower() == 'профиль':
         await bot.branch.exit(ans.peer_id)
         await profile(ans)
+
+
+@bot.on.message_handler(text='связаться', lower=True)
+async def contact(ans: Message):
+    await ans(
+        'Если у тебя что-то случилось, то ты всегда можешь обратиться за помощью к моему разработчику.\n'
+        'Вот ссылка на него: https://vk.cc/avIrel\n'
+        'Думаю, что ответ быстро придет.\n'
+        'Но на некоторые вопросы уже есть ответ в документации, которая доступна по ссылке: https://vk.cc/avIrbJ',
+        keyboard=await create_keyboard('to_menu')
+    )
 
 
 bot.run_polling(skip_updates=False)
