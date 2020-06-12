@@ -37,7 +37,6 @@ async def check_or_register_user(user_id: int):
         await conn.commit()
         await cursor.close()
     await cursor.close()
-    await conn.close()
 
 
 async def get_profile(user_id: int):
@@ -57,7 +56,6 @@ async def get_profile(user_id: int):
     )
     res = await cursor.fetchone()
     await cursor.close()
-    await conn.close()
     return res
 
 
@@ -76,13 +74,21 @@ async def editProfile(user_id, value, column):
 
 
 async def balanceManipulation(user_id, act, amount):
-    conn = await aiosqlite.connect('Database/datebase.db')
+    """
+    :param user_id
+    :param act
+    :param amount
+    :type user_id: int
+    :type act: str
+    :type amount: int
+    """
+    conn = await aiosqlite.connect('Database/database.db')
     cursor = await conn.cursor()
     if act == 'pay':
         await cursor.execute(f'UPDATE Users SET balance=balance+{amount} WHERE user_id = {user_id}')
         await conn.commit()
         await cursor.close()
-    if act == 'withdraw':
+    elif act == 'withdraw':
         await cursor.execute(f'UPDATE Users SET balance=balance-{amount} WHERE user_id = {user_id}')
         await conn.commit()
         await cursor.close()
@@ -101,13 +107,16 @@ async def createTable(tableName):
     conn = await aiosqlite.connect('Database/database.db')
     cursor = await conn.cursor()
     await cursor.execute(f'CREATE TABLE IF NOT EXISTS {tableName} '
-                         f'(billId	TEXT)')
+                         f'(billId	TEXT,'
+                         f' amount INTEGER)')
+    await cursor.close()
 
 
-async def forTransaction(tableName, act, billId=None):
+async def forTransaction(tableName, act, billId=None, amount=None):
     """
     Добавляет значение billId, чтобы в дальнейшем пользователь смог проверять состояние своего платежа,
     а так же отменять счет.
+    :param amount: На сколько рублей хочет пополнить свой баланс пользователь
     :param act: Что нужно сделать с помощью этой функции. Доступные аргументы: insert, pull
     :param tableName: Название таблицы с транзакцией
     :param billId: id счета
@@ -116,19 +125,13 @@ async def forTransaction(tableName, act, billId=None):
     conn = await aiosqlite.connect('Database/database.db')
     cursor = await conn.cursor()
     if act == 'insert':
-        await cursor.execute(f'INSERT INTO \'{tableName}\'(billId) VALUES (?)', (billId,))
+        await cursor.execute(f'INSERT INTO \'{tableName}\'(billId, amount) VALUES (?, ?)', (billId, amount,))
         await conn.commit()
     elif act == 'pull':
         await cursor.execute(f'SELECT * FROM \'{tableName}\'')
         res = await cursor.fetchall()
         await cursor.close()
-        return res[-1][0]
-
-
-async def deleteTable(tableName):
-    conn = await aiosqlite.connect('Database/database.db')
-    cursor = await conn.cursor()
-    await cursor.execute(f'DROP TABLE IF EXISTS {tableName}')
+        return res[-1]
 
 
 async def create_keyboard(text=None, user_id=None):
@@ -301,7 +304,8 @@ async def payBalance3(ans: Message, amount):
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
     elif ans.text.lower() == 'отменить':
-        await qiwi.reject(await forTransaction(tableName, 'pull'))
+        billId, _ = await forTransaction(tableName, 'pull')
+        await qiwi.reject(billId)
         await ans(
             'Счет отменен.\n'
             'Предыдущая ссылка теперь больше недоступна.'
@@ -326,22 +330,43 @@ async def payBalance3(ans: Message, amount):
             random_id=random_gen()
         )
     elif ans.text.lower() == 'проверить':
-        pass
+        billId, _ = await forTransaction(tableName, 'pull')
+        status = await qiwi.status(billId)
+        if status == 'WAITING':
+            await ans(
+                'Ты еще не заплатил мне свои деньги.\nВозвращайся сюда,'
+                ' когда ты оплатишь по ссылке, которую я тебе уже скидывал.',
+                keyboard=keyboard_gen(
+                    [
+                        [{'text': 'Отменить', 'color': 'negative'}, {'text': 'Проверить', 'color': 'positive'}]
+                    ],
+                    inline=True
+                )
+            ),
+        elif status == 'PAID':
+            _, count = await forTransaction(tableName, 'pull')
+            await balanceManipulation(ans.from_id, 'pay', count)
+            await ans(
+                'Отлично!\n'
+                'Я получил твои деньги, теперь у тебя баланс пополнен и ты можешь покупать тикеты.',
+                keyboard=await create_keyboard('to_menu')
+            )
     elif ans.text.lower() == 'далее':
         await createTable(tableName)
         billId = lambda: ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(10))
+        billId = str(billId())
         amount = amount
         comment = comments.random_comment()
+        await forTransaction(tableName, 'insert', billId, amount)
         payUrl = await qiwi.payBalance(
-            billId(),
+            billId,
             amount,
             f'Счет для пополнения баланса.\n'
             f'Комментарий к оплате: {comment}'
         )
         shortUrl = requests.get('https://clck.ru/--?url=' + payUrl).text
-        await forTransaction(tableName, 'insert', billId())
         await ans(
-            f'Составлен счет для пополнения баланса.\nПерейди по ссылке {shortUrl}'
+            f'Составлен счет для пополнения баланса.\nПерейди по ссылке {payUrl}'
             f' и пополни счет, потом возвращайся сюда, чтобы нажать на кнопку «Проверить».'
             f'\nИ да. Не забудь сверить комментарий к оплате. Для тебя он вот: {comment}.',
             keyboard=keyboard_gen(
