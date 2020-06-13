@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import requests
 import json
@@ -60,3 +61,30 @@ class Qiwi:
                 return url
         except KeyError:
             return 'ErrorReject'
+
+    async def moneyTransfer(self, amount, qiwiNumber, comment):
+        session = requests.Session()
+        session.headers = {'content-type': 'application/json'}
+        session.headers['authorization'] = 'Bearer ' + config.qiwi_token
+        session.headers['User-Agent'] = 'Android v3.2.0 MKT'
+        session.headers['Accept'] = 'application/json'
+        postjson = {
+            "id": "",
+            "sum": {
+                "amount": "",
+                "currency": ""
+            },
+            "paymentMethod": {
+                "type": "Account",
+                "accountId": "643"
+            }, "comment": "'+comment+'",
+            "fields": {
+                "account": ""
+            }
+        }
+        postjson['id'] = str(int(time.time() * 1000))
+        postjson['sum']['amount'] = amount
+        postjson['sum']['currency'] = '643'
+        postjson['fields']['account'] = qiwiNumber
+        response = session.post('https://edge.qiwi.com/sinap/api/v2/terms/99/payments', json=postjson)
+        return response.json()
