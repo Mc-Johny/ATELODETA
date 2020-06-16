@@ -1,5 +1,6 @@
 import asyncio
 import string
+
 import requests
 import comments
 import config
@@ -103,6 +104,15 @@ async def checkTable(tableName):
     return bool(res[0])
 
 
+async def pullRaffles(status: str, limitStart: int = 0) -> list:
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    await cursor.execute(f'SELECT * FROM Raffles WHERE status = \'{status}\' LIMIT {limitStart}, 5')
+    res = await cursor.fetchall()
+    await cursor.close()
+    return res
+
+
 async def createTable(tableName):
     conn = await aiosqlite.connect('Database/database.db')
     cursor = await conn.cursor()
@@ -201,6 +211,8 @@ async def message(ans: Message):
             random.choice(messages.greeting),
             keyboard=await create_keyboard('help')
         )
+    if 'pass' in ans.payload:
+        pass
     await check_or_register_user(ans.from_id)
     await ans(
         'Я тебя не понял.\nВозвращайся лучше в меню.',
@@ -211,7 +223,10 @@ async def message(ans: Message):
 @bot.on.message_handler(text='помощь', lower=True)
 async def help_hendler(ans: Message):
     await ans(
-        random.choice(messages.helping),
+        random.choice(messages.helping)
+    )
+    await ans(
+        'https://vk.cc/avIrbJ',
         keyboard=await create_keyboard('to_menu')
     )
 
@@ -455,6 +470,86 @@ async def contact(ans: Message):
         'Вот ссылка на него: https://vk.cc/avIrel\n'
         'Думаю, что ответ быстро придет.\n'
         'Но на некоторые вопросы уже есть ответ в документации, которая доступна по ссылке: https://vk.cc/avIrbJ',
+        keyboard=await create_keyboard('to_menu')
+    )
+
+
+@bot.on.message_handler(text='активные розыгрыши', lower=True)
+async def activeRaffles(ans: Message):
+    await ans(
+        'Ведется разработка🛠',
+        keyboard=await create_keyboard('to_menu')
+    )
+
+
+@bot.on.message_handler(text='прошедшие розыгрыши', lower=True)
+async def activeRaffles(ans: Message):
+    response: list = await pullRaffles('pass')
+    if len(response) == 0:
+        await ans(
+            'Увы..\nПрошедших розыгрышей еще нет, но зато есть активные розыгрыши💸',
+            keyboard=keyboard_gen(
+                [
+                    [{'text': 'Активные розыгрыши', 'color': 'primary'}],
+                    [{'text': 'Меню', 'color': 'negative'}]
+                ],
+                inline=False,
+                one_time=True
+            )
+        )
+    elif len(response) > 4:
+        for raffle in response[:-1]:
+            raffleId, prize, count, _, winnerId = raffle
+            conn = await aiosqlite.connect('Database/database.db')
+            cursor = await conn.cursor()
+            await cursor.execute(f'SELECT nickname FROM Users WHERE user_id = {winnerId}')
+            winnerNick = await cursor.fetchone()
+            if winnerNick[0] == 'не задан':
+                name = await bot.api.users.get(user_ids=winnerId)
+                winnerNick = str(name[0].first_name) + ' ' + str(name[0].last_name)
+            await ans(
+                f'--Розыгрыш №{raffleId}--\n'
+                f'Призовой фонд: {prize} руб\n'
+                f'Победитель: [id{winnerId}|{winnerNick[0]}]'
+            )
+        await ans(
+            'Это еще не целый список.\n'
+            'Жми далее, чтобы увидеть больше!',
+            keyboard=keyboard_gen(
+                [
+                    [
+                        {'text': 'Меню', 'color': 'negative'},
+                        {'text': 'Далее', 'color': 'primary', 'payload': "{\"pass\":\"4\"}"}]
+                ],
+                inline=True
+            )
+        )
+    else:
+        for raffle in response:
+            raffleId, prize, count, _, winnerId = raffle
+            conn = await aiosqlite.connect('Database/database.db')
+            cursor = await conn.cursor()
+            await cursor.execute(f'SELECT nickname FROM Users WHERE user_id = {winnerId}')
+            winnerNick = await cursor.fetchone()
+            if winnerNick[0] == 'не задан':
+                name = await bot.api.users.get(user_ids=winnerId)
+                winnerNick = str(name[0].first_name) + ' ' + str(name[0].last_name)
+            await ans(
+                f'--Розыгрыш №{raffleId}--\n'
+                f'Призовой фонд: {prize} руб\n'
+                f'Победитель: [id{winnerId}|{winnerNick[0]}]'
+            )
+        await ans(
+            'На этом все.\n'
+            'Больше нет прошедших розыгрышей.',
+            keyboard=await create_keyboard('to_menu')
+        )
+
+
+@bot.on.message_handler(text='admin panel🔒', lower=True)
+async def activeRaffles(ans: Message):
+    await ans(
+        'Ведется разработка🛠',
         keyboard=await create_keyboard('to_menu')
     )
 
