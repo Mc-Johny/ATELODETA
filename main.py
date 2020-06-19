@@ -1,4 +1,5 @@
 import asyncio
+import re
 import string
 
 import requests
@@ -206,18 +207,142 @@ async def create_keyboard(text=None, user_id=None):
 
 @bot.on.message()
 async def message(ans: Message):
+    print(type(ans.payload))
     if ans.payload == '{\"command\":\"start\"}':
         await ans(
             random.choice(messages.greeting),
             keyboard=await create_keyboard('help')
         )
-    if 'pass' in ans.payload:
+    if ans.payload is None:
+        await ans(
+            'Я тебя не понял.\nВозвращайся лучше в меню.',
+            keyboard=await create_keyboard('to_menu')
+        )
+    try:
+        if 'nextpass' in ans.payload:
+            payloadNum = int(re.sub(r'[nextpass{:"}]', '', ans.payload))
+            passList: list = await pullRaffles('pass', payloadNum)
+            if len(passList) > 4:
+                for raffle in passList[:-1]:
+                    raffleId, prize, _, _, winnerId = raffle
+                    conn = await aiosqlite.connect('Database/database.db')
+                    cursor = await conn.cursor()
+                    await cursor.execute(f'SELECT nickname FROM Users WHERE user_id = {winnerId}')
+                    winnerNick = await cursor.fetchone()
+                    if winnerNick[0] == 'не задан':
+                        name = await bot.api.users.get(user_ids=winnerId)
+                        winnerNick = str(name[0].first_name) + ' ' + str(name[0].last_name)
+                    else:
+                        winnerNick = winnerNick[0]
+                    await ans(
+                        f'--Розыгрыш №{raffleId}--\n'
+                        f'Призовой фонд: {prize} руб\n'
+                        f'Победитель: [id{winnerId}|{winnerNick}]'
+                    )
+                payload = f'[_nextpass_:_{payloadNum+4}_]'
+                payload = payload.replace('_', '\"').replace('[', '{').replace(']', '}')
+                await ans(
+                    'Это еще не целый список.\n'
+                    'Жми далее, чтобы увидеть больше!',
+                    keyboard=keyboard_gen(
+                        [
+                            [
+                                {'text': 'Меню', 'color': 'negative'},
+                                {'text': 'Далее', 'color': 'primary', 'payload': payload}]
+                        ],
+                        inline=True
+                    )
+                )
+            else:
+                for raffle in passList:
+                    raffleId, prize, _, _, winnerId = raffle
+                    conn = await aiosqlite.connect('Database/database.db')
+                    cursor = await conn.cursor()
+                    await cursor.execute(f'SELECT nickname FROM Users WHERE user_id = {winnerId}')
+                    winnerNick = await cursor.fetchone()
+                    if winnerNick[0] == 'не задан':
+                        name = await bot.api.users.get(user_ids=winnerId)
+                        winnerNick = str(name[0].first_name) + ' ' + str(name[0].last_name)
+                    else:
+                        winnerNick = winnerNick[0]
+                    await ans(
+                        f'--Розыгрыш №{raffleId}--\n'
+                        f'Призовой фонд: {prize} руб\n'
+                        f'Победитель: [id{winnerId}|{winnerNick}]'
+                    )
+                await ans(
+                    'На этом все.\n'
+                    'Больше нет прошедших розыгрышей.',
+                    keyboard=await create_keyboard('to_menu')
+                )
+        elif 'nextactive' in ans.payload:
+            payloadNum = int(re.sub(r'[nextactive{:"}]', '', ans.payload))
+            activeList: list = await pullRaffles('active', payloadNum)
+            if len(activeList) > 4:
+                for raffle in activeList[:-1]:
+                    raffleId, prize, count, _, _ = raffle
+                    conn = await aiosqlite.connect('Database/database.db')
+                    cursor = await conn.cursor()
+                    await cursor.execute(f'SELECT user_id FROM Raffle_{raffleId}')
+                    bought = await cursor.fetchall()
+                    payload = f'[_active_:_{raffleId}_]'
+                    payload = payload.replace('_', '\"').replace('[', '{').replace(']', '}')
+                    await ans(
+                        f'--Розыгрыш №{raffleId}--\n'
+                        f'Призовой фонд: {prize}\n'
+                        f'Стоимость 1 тикета: {int(prize / count)} руб\n'
+                        f'Куплено тикетов {len(bought)} из {count}.',
+                        keyboard=keyboard_gen(
+                            [
+                                [{'text': 'Участвовать', 'color': 'positive', 'payload': payload}]
+                            ],
+                            inline=True
+                        )
+                    )
+                payload = f'[_nextactive_:_{payloadNum + 4}_]'
+                payload = payload.replace('_', '\"').replace('[', '{').replace(']', '}')
+                await ans(
+                    'Это еще не целый список.\n'
+                    'Жми далее, чтобы увидеть больше!',
+                    keyboard=keyboard_gen(
+                        [
+                            [
+                                {'text': 'Меню', 'color': 'negative'},
+                                {'text': 'Далее', 'color': 'primary', 'payload': payload}]
+                        ],
+                        inline=True
+                    )
+                )
+            else:
+                for raffle in activeList:
+                    raffleId, prize, count, _, _ = raffle
+                    conn = await aiosqlite.connect('Database/database.db')
+                    cursor = await conn.cursor()
+                    await cursor.execute(f'SELECT user_id FROM Raffle_{raffleId}')
+                    bought = await cursor.fetchall()
+                    payload = f'[_active_:_{raffleId}_]'
+                    payload = payload.replace('_', '\"').replace('[', '{').replace(']', '}')
+                    await ans(
+                        f'--Розыгрыш №{raffleId}--\n'
+                        f'Призовой фонд: {prize}\n'
+                        f'Стоимость 1 тикета: {int(prize / count)} руб\n'
+                        f'Куплено тикетов {len(bought)} из {count}.',
+                        keyboard=keyboard_gen(
+                            [
+                                [{'text': 'Участвовать', 'color': 'positive', 'payload': payload}]
+                            ],
+                            inline=True
+                        )
+                    )
+                await ans(
+                    'Увы.\n'
+                    'Список активных розыгрышей закончился.',
+                    keyboard=await create_keyboard('to_menu')
+                )
+    except TypeError:
         pass
     await check_or_register_user(ans.from_id)
-    await ans(
-        'Я тебя не понял.\nВозвращайся лучше в меню.',
-        keyboard=await create_keyboard('to_menu')
-    )
+
 
 
 @bot.on.message_handler(text='помощь', lower=True)
@@ -476,16 +601,52 @@ async def contact(ans: Message):
 
 @bot.on.message_handler(text='активные розыгрыши', lower=True)
 async def activeRaffles(ans: Message):
-    await ans(
-        'Ведется разработка🛠',
-        keyboard=await create_keyboard('to_menu')
-    )
+    activeList: list = await pullRaffles('active')
+    if len(activeList) == 0:
+        await ans(
+            'На данный момент пока нет активных розыгрышей..\n'
+            'Жди уведомление о появлении нового розыгрыша.',
+            keyboard=await create_keyboard('to_menu')
+        )
+    elif len(activeList) > 4:
+        for raffle in activeList[:-1]:
+            raffleId, prize, count, _, _ = raffle
+            conn = await aiosqlite.connect('Database/database.db')
+            cursor = await conn.cursor()
+            await cursor.execute(f'SELECT user_id FROM Raffle_{raffleId}')
+            bought = await cursor.fetchall()
+            payload = f'[_active_:_{raffleId}_]'
+            payload = payload.replace('_', '\"').replace('[', '{').replace(']', '}')
+            await ans(
+                f'--Розыгрыш №{raffleId}--\n'
+                f'Призовой фонд: {prize}\n'
+                f'Стоимость 1 тикета: {int(prize/count)} руб\n'
+                f'Куплено тикетов {len(bought)} из {count}.',
+                keyboard=keyboard_gen(
+                    [
+                        [{'text': 'Участвовать', 'color': 'positive', 'payload': payload}]
+                    ],
+                    inline=True
+                )
+            )
+        await ans(
+            'Это еще не целый список.\n'
+            'Жми далее, чтобы увидеть больше!',
+            keyboard=keyboard_gen(
+                [
+                    [
+                        {'text': 'Меню', 'color': 'negative'},
+                        {'text': 'Далее', 'color': 'primary', 'payload': "{\"nextactive\":\"4\"}"}]
+                ],
+                inline=True
+            )
+        )
 
 
 @bot.on.message_handler(text='прошедшие розыгрыши', lower=True)
 async def activeRaffles(ans: Message):
-    response: list = await pullRaffles('pass')
-    if len(response) == 0:
+    passList: list = await pullRaffles('pass')
+    if len(passList) == 0:
         await ans(
             'Увы..\nПрошедших розыгрышей еще нет, но зато есть активные розыгрыши💸',
             keyboard=keyboard_gen(
@@ -497,9 +658,9 @@ async def activeRaffles(ans: Message):
                 one_time=True
             )
         )
-    elif len(response) > 4:
-        for raffle in response[:-1]:
-            raffleId, prize, count, _, winnerId = raffle
+    elif len(passList) > 4:
+        for raffle in passList[:-1]:
+            raffleId, prize, _, _, winnerId = raffle
             conn = await aiosqlite.connect('Database/database.db')
             cursor = await conn.cursor()
             await cursor.execute(f'SELECT nickname FROM Users WHERE user_id = {winnerId}')
@@ -507,10 +668,12 @@ async def activeRaffles(ans: Message):
             if winnerNick[0] == 'не задан':
                 name = await bot.api.users.get(user_ids=winnerId)
                 winnerNick = str(name[0].first_name) + ' ' + str(name[0].last_name)
+            else:
+                winnerNick = winnerNick[0]
             await ans(
                 f'--Розыгрыш №{raffleId}--\n'
                 f'Призовой фонд: {prize} руб\n'
-                f'Победитель: [id{winnerId}|{winnerNick[0]}]'
+                f'Победитель: [id{winnerId}|{winnerNick}]'
             )
         await ans(
             'Это еще не целый список.\n'
@@ -519,14 +682,14 @@ async def activeRaffles(ans: Message):
                 [
                     [
                         {'text': 'Меню', 'color': 'negative'},
-                        {'text': 'Далее', 'color': 'primary', 'payload': "{\"pass\":\"4\"}"}]
+                        {'text': 'Далее', 'color': 'primary', 'payload': "{\"nextpass\":\"4\"}"}]
                 ],
                 inline=True
             )
         )
     else:
-        for raffle in response:
-            raffleId, prize, count, _, winnerId = raffle
+        for raffle in passList:
+            raffleId, prize, _, _, winnerId = raffle
             conn = await aiosqlite.connect('Database/database.db')
             cursor = await conn.cursor()
             await cursor.execute(f'SELECT nickname FROM Users WHERE user_id = {winnerId}')
@@ -534,10 +697,12 @@ async def activeRaffles(ans: Message):
             if winnerNick[0] == 'не задан':
                 name = await bot.api.users.get(user_ids=winnerId)
                 winnerNick = str(name[0].first_name) + ' ' + str(name[0].last_name)
+            else:
+                winnerNick = winnerNick[0]
             await ans(
                 f'--Розыгрыш №{raffleId}--\n'
                 f'Призовой фонд: {prize} руб\n'
-                f'Победитель: [id{winnerId}|{winnerNick[0]}]'
+                f'Победитель: [id{winnerId}|{winnerNick}]'
             )
         await ans(
             'На этом все.\n'
