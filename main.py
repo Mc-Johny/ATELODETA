@@ -145,6 +145,14 @@ async def forTransaction(tableName, act, billId=None, amount=None):
         return res[-1]
 
 
+async def boughtTicket(raffleId):
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    await cursor.execute(f'SELECT user_id FROM Raffle_{raffleId}')
+    bought = await cursor.fetchall()
+    return len(bought)
+
+
 async def create_keyboard(text=None, user_id=None):
     keyboard = Keyboard(one_time=True, inline=False)
     if text == 'help':
@@ -239,7 +247,7 @@ async def message(ans: Message):
                         f'Призовой фонд: {prize} руб\n'
                         f'Победитель: [id{winnerId}|{winnerNick}]'
                     )
-                payload = f'[_nextpass_:_{payloadNum+4}_]'
+                payload = f'[_nextpass_:_{payloadNum + 4}_]'
                 payload = payload.replace('_', '\"').replace('[', '{').replace(']', '}')
                 await ans(
                     'Это еще не целый список.\n'
@@ -281,17 +289,14 @@ async def message(ans: Message):
             if len(activeList) > 4:
                 for raffle in activeList[:-1]:
                     raffleId, prize, count, _, _ = raffle
-                    conn = await aiosqlite.connect('Database/database.db')
-                    cursor = await conn.cursor()
-                    await cursor.execute(f'SELECT user_id FROM Raffle_{raffleId}')
-                    bought = await cursor.fetchall()
+                    bought = await boughtTicket(raffleId)
                     payload = f'[_active_:_{raffleId}_]'
                     payload = payload.replace('_', '\"').replace('[', '{').replace(']', '}')
                     await ans(
                         f'--Розыгрыш №{raffleId}--\n'
                         f'Призовой фонд: {prize}\n'
                         f'Стоимость 1 тикета: {int(prize / count)} руб\n'
-                        f'Куплено тикетов {len(bought)} из {count}.',
+                        f'Куплено тикетов {bought} из {count}.',
                         keyboard=keyboard_gen(
                             [
                                 [{'text': 'Участвовать', 'color': 'positive', 'payload': payload}]
@@ -316,17 +321,14 @@ async def message(ans: Message):
             else:
                 for raffle in activeList:
                     raffleId, prize, count, _, _ = raffle
-                    conn = await aiosqlite.connect('Database/database.db')
-                    cursor = await conn.cursor()
-                    await cursor.execute(f'SELECT user_id FROM Raffle_{raffleId}')
-                    bought = await cursor.fetchall()
+                    bought = await boughtTicket(raffleId)
                     payload = f'[_active_:_{raffleId}_]'
                     payload = payload.replace('_', '\"').replace('[', '{').replace(']', '}')
                     await ans(
                         f'--Розыгрыш №{raffleId}--\n'
                         f'Призовой фонд: {prize}\n'
                         f'Стоимость 1 тикета: {int(prize / count)} руб\n'
-                        f'Куплено тикетов {len(bought)} из {count}.',
+                        f'Куплено тикетов {bought} из {count}.',
                         keyboard=keyboard_gen(
                             [
                                 [{'text': 'Участвовать', 'color': 'positive', 'payload': payload}]
@@ -342,7 +344,6 @@ async def message(ans: Message):
     except TypeError:
         pass
     await check_or_register_user(ans.from_id)
-
 
 
 @bot.on.message_handler(text='помощь', lower=True)
@@ -495,7 +496,6 @@ async def payBalance3(ans: Message, amount):
             f'Счет для пополнения баланса.\n'
             f'Комментарий к оплате: {comment}'
         )
-        shortUrl = requests.get('https://clck.ru/--?url=' + payUrl).text
         await ans(
             f'Составлен счет для пополнения баланса.\nПерейди по ссылке {payUrl}'
             f' и пополни счет, потом возвращайся сюда, чтобы нажать на кнопку «Проверить».'
@@ -611,17 +611,14 @@ async def activeRaffles(ans: Message):
     elif len(activeList) > 4:
         for raffle in activeList[:-1]:
             raffleId, prize, count, _, _ = raffle
-            conn = await aiosqlite.connect('Database/database.db')
-            cursor = await conn.cursor()
-            await cursor.execute(f'SELECT user_id FROM Raffle_{raffleId}')
-            bought = await cursor.fetchall()
+            bought = await boughtTicket(raffleId)
             payload = f'[_active_:_{raffleId}_]'
             payload = payload.replace('_', '\"').replace('[', '{').replace(']', '}')
             await ans(
                 f'--Розыгрыш №{raffleId}--\n'
                 f'Призовой фонд: {prize}\n'
-                f'Стоимость 1 тикета: {int(prize/count)} руб\n'
-                f'Куплено тикетов {len(bought)} из {count}.',
+                f'Стоимость 1 тикета: {int(prize / count)} руб\n'
+                f'Куплено тикетов {bought} из {count}.',
                 keyboard=keyboard_gen(
                     [
                         [{'text': 'Участвовать', 'color': 'positive', 'payload': payload}]
@@ -640,6 +637,56 @@ async def activeRaffles(ans: Message):
                 ],
                 inline=True
             )
+        )
+
+
+@bot.on.message_handler(text='участвовать', lower=True)
+async def takePart(ans: Message):
+    if ans.payload is None:
+        await ans(
+            'Я шото не понял.\n'
+            'Почему ты ввел с клавиатуры слово «Участвовать»?\n'
+            'Я пойму тебя, если ты выберешь нужный для тебя розыгрыш и нажмешь на кнопку ниже.\n'
+            '(Она если что подписана «Участвовать»)\n'
+            'Надеюсь ты меня понял.',
+            keyboard=await create_keyboard('to_menu')
+        )
+    else:
+        payloadNum = int(re.sub(r'[active{:"}]', '', ans.payload))
+        conn = await aiosqlite.connect('Database/database.db')
+        cursor = await conn.cursor()
+        await cursor.execute(f'SELECT count_tickets FROM Raffles WHERE id = {payloadNum}')
+        count = await cursor.fetchone()
+        bought = count[0] - await boughtTicket(payloadNum)
+        await ans(
+            f'Если ты хочешь купить тикет(ы) для участия в розыгрыше №{payloadNum}, '
+            f'то ты просто должен ввести их кол-во.\n'
+            f'Доступное кол-во тикетов для покупки: {bought}',
+            keyboard=await create_keyboard('to_menu')
+        )
+        await bot.branch.add(ans.peer_id, 'buyTickets', raffleId=payloadNum)
+
+
+@bot.branch.simple_branch('buyTickets')
+async def buyTickets(ans: Message, raffleId):
+    if ans.text.lower() == 'меню':
+        await bot.branch.exit(ans.peer_id)
+        await menu(ans)
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    await cursor.execute(f'SELECT count_tickets FROM Raffles WHERE id = {raffleId}')
+    count = await cursor.fetchone()
+    bought = count[0] - await boughtTicket(raffleId)
+    if ans.text.isdigit():
+        if int(ans.text) <= bought:
+            pass
+        else:
+            pass
+    else:
+        await ans(
+            f'Введи, пожалуйста, кол-во тикетов, которые собираешься приобретать(целое число. Ок?).\n'
+            f'Доступно тикетов: {bought}',
+            keyboard=await create_keyboard('to_menu')
         )
 
 
