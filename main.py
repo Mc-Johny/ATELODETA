@@ -11,6 +11,7 @@ import transactions
 from vkbottle import Bot, Message, User
 from vkbottle.api.keyboard import keyboard_gen
 from vkbottle.keyboard import Text, Keyboard
+from vkbottle.branch import ExitBranch
 
 bot = Bot(config.token)
 user = User(config.acces_token)
@@ -201,6 +202,14 @@ async def usersWinRaffle(raffleId, winnerId):
     await cursor.execute(f'SELECT user_id FROM Raffle_{raffleId}')
     res = await cursor.fetchall()
     return [participant[0] for participant in list(set(res)) if participant[0] != winnerId]
+
+
+async def checkBalance(user_id):
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    await cursor.execute(f'SELECT balance FROM Users WHERE user_id = {user_id}')
+    res = await cursor.fetchone()
+    return res[0]
 
 
 async def create_keyboard(text=None, user_id=None):
