@@ -2,7 +2,6 @@ import asyncio
 import re
 import string
 
-import requests
 import comments
 import config
 import random
@@ -16,11 +15,6 @@ from vkbottle.keyboard import Text, Keyboard
 bot = Bot(config.token)
 user = User(config.acces_token)
 qiwi = transactions.Qiwi()
-
-
-def random_gen():
-    string = random.randint(0, 1000000)
-    return string
 
 
 async def check_or_register_user(user_id: int):
@@ -91,9 +85,14 @@ async def balanceManipulation(user_id, act, amount):
         await conn.commit()
         await cursor.close()
     elif act == 'withdraw':
-        await cursor.execute(f'UPDATE Users SET balance=balance-{amount} WHERE user_id = {user_id}')
-        await conn.commit()
-        await cursor.close()
+        await cursor.execute(f'SELECT balance FROM Users WHERE user_id = {user_id}')
+        balance = await cursor.fetchone()
+        if balance[0] > amount:
+            await cursor.execute(f'UPDATE Users SET balance=balance-{amount} WHERE user_id = {user_id}')
+            await conn.commit()
+            await cursor.close()
+            return True
+        return False
 
 
 async def checkTable(tableName):
@@ -149,8 +148,59 @@ async def boughtTicket(raffleId):
     conn = await aiosqlite.connect('Database/database.db')
     cursor = await conn.cursor()
     await cursor.execute(f'SELECT user_id FROM Raffle_{raffleId}')
-    bought = await cursor.fetchall()
+    bought: list = await cursor.fetchall()
     return len(bought)
+
+
+async def countTicket(raffleId):
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    await cursor.execute(f'SELECT count_tickets FROM Raffles WHERE id = {raffleId}')
+    count = await cursor.fetchone()
+    return count[0]
+
+
+async def addTicket(user_id, raffleId, ticketCount):
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    for ticket in range(ticketCount):
+        await cursor.executescript(f"""
+           UPDATE Users SET buy_ticket=buy_ticket+1 WHERE user_id = {user_id};
+            
+           INSERT INTO Raffle_{raffleId} (user_id) VALUES ({user_id});
+        """)
+    await cursor.close()
+
+
+async def getWinner(raffleId):
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    await cursor.execute(f'SELECT * FROM Raffle_{raffleId}')
+    res = await cursor.fetchall()
+    random.shuffle(res)
+    listUsers = random.choices(res, k=3)
+    winner = random.choice(listUsers)
+    await cursor.execute(f'UPDATE Raffles SET \'status\' = \'pass\', '
+                         f'winner = {winner[1]} WHERE id = 1')
+    await conn.commit()
+    await cursor.close()
+    return winner
+
+
+async def winnerNickname(winnerId):
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    await cursor.execute(f'SELECT nickname FROM Users WHERE user_id = {winnerId}')
+    winner = await cursor.fetchone()
+    return winner
+
+
+async def usersWinRaffle(raffleId, winnerId):
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    await cursor.execute(f'SELECT user_id FROM Raffle_{raffleId}')
+    res = await cursor.fetchall()
+    return [participant[0] for participant in list(set(res)) if participant[0] != winnerId]
 
 
 async def create_keyboard(text=None, user_id=None):
@@ -215,7 +265,6 @@ async def create_keyboard(text=None, user_id=None):
 
 @bot.on.message()
 async def message(ans: Message):
-    print(type(ans.payload))
     if ans.payload == '{\"command\":\"start\"}':
         await ans(
             random.choice(messages.greeting),
@@ -371,11 +420,11 @@ async def profile(ans: Message):
     str_qiwi = ''
     if qiwi_number == 'не задан':
         qiwi_number += ' ✘'
-        str_qiwi += '\n\nТак как у вас не задан номер QIWI кошелька,' \
-                    ' то в случае вашей победы деньги не будут переведены.\n' \
-                    'Если у вас еще нет кошелька, то обязательно заведите на сайте qiwi.com и ' \
-                    'Получите статус «Основной»\nПосле этого нажмите на' \
-                    ' соответсвующую кнопку ниже.'
+        str_qiwi += '\n\nТак как у тебя не задан номер QIWI кошелька,' \
+                    ' то ты не сможешь вывести деньги со своего баланса. Имей ввиду.\n' \
+                    'Если у тебя еще нет кошелька, то обязательно заведи на сайте qiwi.com и ' \
+                    'Получи статус «Основной»\nПосле этого добавь свой номер' \
+                    ' с помощью соответсвующей кнопки ниже.'
     if nickname == 'не задан':
         nickname += ' ✘'
     name = await bot.api.users.get(user_ids=ans.from_id)
@@ -384,7 +433,7 @@ async def profile(ans: Message):
         '\nБаланс: ' + str(balance) + ' руб.' +
         '\nНикнейм: ' + nickname +
         '\nКуплено тикетов за все время: ' + str(buy_ticket) +
-        '\n Номер кошелька QIWI: +' + str(qiwi_number) +
+        '\nНомер кошелька QIWI: ' + str(qiwi_number) +
         '\nПобед за все время: ' + str(wins) + str_qiwi,
         keyboard=await create_keyboard(ans.text.lower(), ans.from_id)
     )
@@ -404,7 +453,8 @@ async def payBalance1(ans: Message):
 async def payBalance2(ans: Message):
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
-        await menu()
+        await menu(ans)
+        return
     if ans.text.isdigit() and int(ans.text) >= 10:
         await ans(
             f'Ты хочешь пополнить свой баланс на {ans.text} руб?\n'
@@ -436,6 +486,7 @@ async def payBalance3(ans: Message, amount):
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
+        return
     elif ans.text.lower() == 'отменить':
         billId, _ = await forTransaction(tableName, 'pull')
         await qiwi.reject(billId)
@@ -446,21 +497,8 @@ async def payBalance3(ans: Message, amount):
         await ans('Произвожу выход в меню.')
         await bot.branch.exit(ans.peer_id)
         await asyncio.sleep(1)
-        # TODO: Стоит это место исправить.
-        await ans(
-            'Главное меню.\nВыбери интересующий тебя раздел.',
-            keyboard=keyboard_gen(
-                [
-                    [{'text': 'Активные розыгрыши', 'color': 'primary'}],
-                    [{'text': 'Прошедшие розыгрыши', 'color': 'primary'}],
-                    [{'text': 'Профиль', 'color': 'secondary'}],
-                    [{'text': 'Связаться', 'color': 'secondary'}],
-                    [{'text': 'Помощь', 'color': 'negative'}]
-                ],
-                one_time=True,
-                inline=False
-            )
-        )
+        await menu()
+        return
     elif ans.text.lower() == 'проверить':
         billId, _ = await forTransaction(tableName, 'pull')
         status = await qiwi.status(billId)
@@ -523,6 +561,11 @@ async def payBalance3(ans: Message, amount):
             )
 
 
+@bot.on.message_handler(text='вывод средств', lower=True)
+async def payOut(ans: Message):
+    pass
+
+
 @bot.on.message_handler(text='добавить/изменить номер', lower=True)
 async def editNumber(ans: Message):
     await ans(
@@ -543,7 +586,7 @@ async def branchEditNumber(ans: Message):
             keyboard=await create_keyboard('edit')
         )
         await bot.branch.exit(ans.peer_id)
-
+        return
     else:
         await ans(
             'Номер невалидный!\nНомер должен:\n•Содержать только цифры и начинаться на 7(без +)\n•Длина 11 цифр.',
@@ -552,11 +595,12 @@ async def branchEditNumber(ans: Message):
 
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
-        await menu()
-
+        await menu(ans)
+        return
     if ans.text.lower() == 'профиль':
         await bot.branch.exit(ans.peer_id)
         await profile(ans)
+        return
 
 
 @bot.on.message_handler(text='добавить/изменить никнейм', lower=True)
@@ -573,19 +617,20 @@ async def editNickname(ans: Message):
 
 @bot.branch.simple_branch('editNickname')
 async def branchEditNickname(ans: Message):
+    if ans.text.lower() == 'меню':
+        await bot.branch.exit(ans.peer_id)
+        await menu(ans)
+        return
+    if ans.text.lower() == 'профиль':
+        await bot.branch.exit(ans.peer_id)
+        await profile(ans)
+        return
     await editProfile(ans.from_id, ans.text, 'nickname')
     await ans(
         'Ваш никнейм успешно сменен!\nТеперь можешь обратно вернуться в свой профиль.',
         keyboard=await create_keyboard('edit')
     )
     await bot.branch.exit(ans.peer_id)
-    if ans.text.lower() == 'меню':
-        await bot.branch.exit(ans.peer_id)
-        await menu()
-
-    if ans.text.lower() == 'профиль':
-        await bot.branch.exit(ans.peer_id)
-        await profile(ans)
 
 
 @bot.on.message_handler(text='связаться', lower=True)
@@ -653,14 +698,10 @@ async def takePart(ans: Message):
         )
     else:
         payloadNum = int(re.sub(r'[active{:"}]', '', ans.payload))
-        conn = await aiosqlite.connect('Database/database.db')
-        cursor = await conn.cursor()
-        await cursor.execute(f'SELECT count_tickets FROM Raffles WHERE id = {payloadNum}')
-        count = await cursor.fetchone()
-        bought = count[0] - await boughtTicket(payloadNum)
+        bought = await countTicket(payloadNum) - await boughtTicket(payloadNum)
         await ans(
             f'Если ты хочешь купить тикет(ы) для участия в розыгрыше №{payloadNum}, '
-            f'то ты просто должен ввести их кол-во.\n'
+            f'то ты просто должен ввести их кол-во.\n\n'
             f'Доступное кол-во тикетов для покупки: {bought}',
             keyboard=await create_keyboard('to_menu')
         )
@@ -672,26 +713,75 @@ async def buyTickets(ans: Message, raffleId):
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
-    conn = await aiosqlite.connect('Database/database.db')
-    cursor = await conn.cursor()
-    await cursor.execute(f'SELECT count_tickets FROM Raffles WHERE id = {raffleId}')
-    count = await cursor.fetchone()
-    bought = count[0] - await boughtTicket(raffleId)
+        return
+    bought = await countTicket(raffleId) - await boughtTicket(raffleId)
     if ans.text.isdigit():
-        if int(ans.text) <= bought:
-            pass
+        if bought >= int(ans.text) > 0:
+            conn = await aiosqlite.connect('Database/database.db')
+            cursor = await conn.cursor()
+            await cursor.execute(f'SELECT prize, count_tickets FROM Raffles WHERE id = {raffleId}')
+            res = await cursor.fetchone()
+            prize, count_ticket = res
+            if await balanceManipulation(ans.from_id, 'withdraw', int((prize / count_ticket) * int(ans.text))):
+                await addTicket(ans.from_id, raffleId, int(ans.text))
+                await ans(
+                    f'Ты успешно купил тикеты!\n'
+                    f'С твоего баланса списано {int((prize / count_ticket) * int(ans.text))} руб.\n'
+                    f'Теперь жди оглашения результатов.\n'
+                    f'Good luck🤑',
+                    keyboard=await create_keyboard('to_menu')
+                )
+                if int(ans.text) == bought:
+                    ticketId, winner = await getWinner(raffleId)
+                    await balanceManipulation(winner, 'pay', prize)
+                    winnernickname = await winnerNickname(winner)
+                    if winnernickname[0] == 'не задан':
+                        name = await bot.api.users.get(user_ids=winner)
+                        winnernickname = str(name[0].first_name) + ' ' + str(name[0].last_name)
+                    else:
+                        winnernickname = winnernickname[0]
+                    await ans(
+                        f'Розыгрыш №{raffleId} завершен!\n'
+                        f'Победителем стал {winnernickname}. Его тикет под номером {ticketId}'
+                        f' стал выигрышным.\n'
+                        f'💸💸💸💸💸💸💸💸',
+                        user_ids=await usersWinRaffle(raffleId, winner)
+                    )
+                    await ans(
+                        'Прими мои поздравления!\n'
+                        'Ты выиграл в розыгрыше №{raffleId}🥳\n'
+                        'Денюжки уже прилетели на твой баланс.\n'
+                        '💸💸💸💸💸💸💸💸',
+                        user_id=winner
+                    )
+                    user.api.wall.post(
+                        owner_id=config.group_id,
+                        from_group=1,
+                        message=f'Только что {winnernickname} стал победителем розыгрыша!\n'
+                                f''
+                    )
+            else:
+                await ans(
+                    'Твой баланс не позволяет приобрести такое кол-во тикетов.',
+                    keyboard=await create_keyboard('to_menu')
+                )
         else:
-            pass
+            await ans(
+                f'Увы. Ты накосячил.😶\n'
+                f'Ты ввел несуществующее кол-во тикетов.\n\n'
+                f'Доступное кол-во тикетов: {bought}',
+                keyboard=await create_keyboard('to_menu')
+            )
     else:
         await ans(
-            f'Введи, пожалуйста, кол-во тикетов, которые собираешься приобретать(целое число. Ок?).\n'
+            f'Введи, пожалуйста, кол-во тикетов, которые собираешься приобретать(Целое число. Ок?).\n\n'
             f'Доступно тикетов: {bought}',
             keyboard=await create_keyboard('to_menu')
         )
 
 
 @bot.on.message_handler(text='прошедшие розыгрыши', lower=True)
-async def activeRaffles(ans: Message):
+async def passRaffles(ans: Message):
     passList: list = await pullRaffles('pass')
     if len(passList) == 0:
         await ans(
@@ -708,19 +798,16 @@ async def activeRaffles(ans: Message):
     elif len(passList) > 4:
         for raffle in passList[:-1]:
             raffleId, prize, _, _, winnerId = raffle
-            conn = await aiosqlite.connect('Database/database.db')
-            cursor = await conn.cursor()
-            await cursor.execute(f'SELECT nickname FROM Users WHERE user_id = {winnerId}')
-            winnerNick = await cursor.fetchone()
-            if winnerNick[0] == 'не задан':
+            winnernickname = await winnerNickname(winnerId)
+            if winnernickname[0] == 'не задан':
                 name = await bot.api.users.get(user_ids=winnerId)
-                winnerNick = str(name[0].first_name) + ' ' + str(name[0].last_name)
+                winnernickname = str(name[0].first_name) + ' ' + str(name[0].last_name)
             else:
-                winnerNick = winnerNick[0]
+                winnernickname = winnernickname[0]
             await ans(
                 f'--Розыгрыш №{raffleId}--\n'
                 f'Призовой фонд: {prize} руб\n'
-                f'Победитель: [id{winnerId}|{winnerNick}]'
+                f'Победитель: [id{winnerId}|{winnernickname}]'
             )
         await ans(
             'Это еще не целый список.\n'
@@ -737,19 +824,16 @@ async def activeRaffles(ans: Message):
     else:
         for raffle in passList:
             raffleId, prize, _, _, winnerId = raffle
-            conn = await aiosqlite.connect('Database/database.db')
-            cursor = await conn.cursor()
-            await cursor.execute(f'SELECT nickname FROM Users WHERE user_id = {winnerId}')
-            winnerNick = await cursor.fetchone()
-            if winnerNick[0] == 'не задан':
+            winnernickname = await winnerNickname(winnerId)
+            if winnernickname[0] == 'не задан':
                 name = await bot.api.users.get(user_ids=winnerId)
-                winnerNick = str(name[0].first_name) + ' ' + str(name[0].last_name)
+                winnernickname = str(name[0].first_name) + ' ' + str(name[0].last_name)
             else:
-                winnerNick = winnerNick[0]
+                winnernickname = winnernickname[0]
             await ans(
                 f'--Розыгрыш №{raffleId}--\n'
                 f'Призовой фонд: {prize} руб\n'
-                f'Победитель: [id{winnerId}|{winnerNick}]'
+                f'Победитель: [id{winnerId}|{winnernickname}]'
             )
         await ans(
             'На этом все.\n'
@@ -759,7 +843,7 @@ async def activeRaffles(ans: Message):
 
 
 @bot.on.message_handler(text='admin panel🔒', lower=True)
-async def activeRaffles(ans: Message):
+async def adminPanel(ans: Message):
     await ans(
         'Ведется разработка🛠',
         keyboard=await create_keyboard('to_menu')
