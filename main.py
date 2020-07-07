@@ -572,7 +572,50 @@ async def payBalance3(ans: Message, amount):
 
 @bot.on.message_handler(text='вывод средств', lower=True)
 async def payOut(ans: Message):
-    pass
+    await ans(
+        'Введи сумму для снятия средств с баланса.\n'
+        'Требования для успешного перевода на твой QIWI кошелек:\n'
+        '•У тебя на балансе больше 10 руб\n'
+        '•Вводить только целое число, без каких либо символов\n'
+        '•Введеная цифра не должна быть больше баланса, но может быть ра́вной',
+        keyboard=await create_keyboard('edit')
+    )
+    await bot.branch.add(ans.peer_id, 'payOut')
+
+
+@bot.branch.simple_branch('payOut')
+async def branchPayOut(ans: Message):
+    if ans.text.lower() == 'меню':
+        await bot.branch.exit(ans.peer_id)
+        await menu(ans)
+        return ExitBranch()
+    if ans.text.lower() == 'профиль':
+        await bot.branch.exit(ans.peer_id)
+        await profile(ans)
+        return ExitBranch()
+    if ans.text.isdigit():
+        if await checkBalance(ans.from_id) >= 10:
+            if int(ans.text) <= await checkBalance(ans.from_id):
+                pass
+            else:
+                await ans(
+                    'Почему-то ты ввел значение отличающееся от баланса.\n'
+                    'Введи, пожалуйста, цифру, которая меньше, либо равна твоему балансу.',
+                    keyboard=await create_keyboard('edit')
+                )
+        else:
+            await ans(
+                'Твой баланс меньше 10 руб.\n'
+                'Так что сори. Как нибудь в другой раз(На самом деле тогда, когда у тебя баланс будет больше'
+                ' 10 руб.)',
+                keyboard=await create_keyboard('edit')
+            )
+    else:
+        await ans(
+            f'Введи, пожалуйста, целое число, а не «{ans.text}».\n'
+            f'Спасибо за понимание.',
+            keyboard=await create_keyboard('edit')
+        )
 
 
 @bot.on.message_handler(text='добавить/изменить номер', lower=True)
