@@ -20,7 +20,7 @@ class Qiwi:
         date = dt.datetime.now() + dt.timedelta(days=15)
         return dt.datetime.strftime(date, '%Y-%m-%dT%H:%M:%S') + '+04:00'
 
-    async def payBalance(self, billId, amount, comment):
+    async def payBalance(self, billId: str, amount: int, comment: str):
         paymentUrl = self.url + billId
         amount = amount + 0.01
         params = {
@@ -41,7 +41,7 @@ class Qiwi:
         except Exception:
             return 'ErrorPay'
 
-    async def status(self, billId):
+    async def status(self, billId: str):
         statusUrl = self.url + billId
         request = requests.get(statusUrl, headers=self.headers)
         request = request.json()
@@ -52,7 +52,7 @@ class Qiwi:
         except KeyError:
             return 'ErrorStatus'
 
-    async def reject(self, billId):
+    async def reject(self, billId: str):
         rejectUrl = self.url + billId + '/reject'
         request = requests.post(rejectUrl, headers=self.headers).json()
         try:
@@ -62,29 +62,21 @@ class Qiwi:
         except KeyError:
             return 'ErrorReject'
 
-    async def moneyTransfer(self, amount, qiwiNumber, comment):
+    async def moneyTransfer(self, amount: int, qiwiNumber: str, comment: str):
         session = requests.Session()
         session.headers = {'content-type': 'application/json'}
         session.headers['authorization'] = 'Bearer ' + config.qiwi_token
         session.headers['User-Agent'] = 'Android v3.2.0 MKT'
         session.headers['Accept'] = 'application/json'
-        postjson = {
-            "id": "",
-            "sum": {
-                "amount": "",
-                "currency": ""
-            },
-            "paymentMethod": {
-                "type": "Account",
-                "accountId": "643"
-            }, "comment": "'+comment+'",
-            "fields": {
-                "account": ""
-            }
-        }
-        postjson['id'] = str(int(time.time() * 1000))
-        postjson['sum']['amount'] = amount
-        postjson['sum']['currency'] = '643'
-        postjson['fields']['account'] = qiwiNumber
-        response = session.post('https://edge.qiwi.com/sinap/api/v2/terms/99/payments', json=postjson)
+        postjson = {"id": str(int(time.time()) * 1000), "sum": {
+            "amount": amount,
+            "currency": '643'
+        }, "paymentMethod": {
+            "type": "Account",
+            "accountId": "643"
+        }, "comment": comment, "fields": {
+            "account": qiwiNumber
+        }}
+        params = json.dumps(postjson)
+        response = session.post('https://edge.qiwi.com/sinap/api/v2/terms/99/payments', data=params)
         return response.json()

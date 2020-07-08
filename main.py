@@ -238,7 +238,7 @@ async def create_keyboard(text=None, user_id=None):
             keyboard.add_button(Text('Admin panel🔒'), color='primary')
         return keyboard.generate()
     elif text == 'профиль':
-        _, nickname, _, qiwi_number, _ = await get_profile(user_id)
+        # _, nickname, _, qiwi_number, _ = await get_profile(user_id)
         keyboard.add_row()
         keyboard.add_button(Text('Пополнить баланс'), color='positive')
         keyboard.add_row()
@@ -572,19 +572,27 @@ async def payBalance3(ans: Message, amount):
 
 @bot.on.message_handler(text='вывод средств', lower=True)
 async def payOut(ans: Message):
-    await ans(
-        'Введи сумму для снятия средств с баланса.\n'
-        'Требования для успешного перевода на твой QIWI кошелек:\n'
-        '•У тебя на балансе больше 10 руб\n'
-        '•Вводить только целое число, без каких либо символов\n'
-        '•Введеная цифра не должна быть больше баланса, но может быть ра́вной',
-        keyboard=await create_keyboard('edit')
-    )
-    await bot.branch.add(ans.peer_id, 'payOut')
+    balance, _, _, number, _ = await get_profile(ans.from_id)
+    if number == 'не задан':
+        await ans(
+            'Ты не можешь вывести средства с баланса, так как у тебя не указан номер QIWI кошелька.\n'
+            'Возвращайся сюда, когда добавишь свой номер, куда намереваешься перевести деньги со своего баланса.',
+            keyboard=await create_keyboard('edit')
+        )
+    else:
+        await ans(
+            'Введи сумму для снятия средств с баланса.\n'
+            'Требования для успешного перевода на твой QIWI кошелек:\n'
+            '•У тебя на балансе больше 10 руб\n'
+            '•Вводить только целое число, без каких либо символов\n'
+            '•Введеная цифра не должна быть больше баланса и равной(из-за 2% комиссии)',
+            keyboard=await create_keyboard('edit')
+        )
+        await bot.branch.add(ans.peer_id, 'payOut', balance=balance, number=number)
 
 
 @bot.branch.simple_branch('payOut')
-async def branchPayOut(ans: Message):
+async def branchPayOut(ans: Message, balance, number):
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
@@ -594,20 +602,51 @@ async def branchPayOut(ans: Message):
         await profile(ans)
         return ExitBranch()
     if ans.text.isdigit():
-        if await checkBalance(ans.from_id) >= 10:
-            if int(ans.text) <= await checkBalance(ans.from_id):
-                pass
+        if int(ans.text) > 10:
+            if balance >= 10:
+                if int(ans.text) + (int(ans.text) * 0.02) <= balance:
+                    res = await qiwi.moneyTransfer(int(ans.text), f'+{number}', 'Перевод средств с баланса профиля'
+                                                                                ' на счет QIWI')
+                    try:
+                        if res['transaction']['state']['code'] == 'Accepted':
+                            await ans(
+                                'Средства с баланса успешно переведены на твой QIWI кошелек!\n',
+                                keyboard=await create_keyboard('to_menu')
+                            )
+                        else:
+                            await ans(
+                                'Средства не переведены. \nУвы..',
+                                keyboard=await create_keyboard('to_menu')
+                            )
+                    except KeyError:
+                        await ans(
+                            f'У [id{ans.from_id}|пользователя] случилась проблемка.\n'
+                            f'Вот ответ сервера:\n{res}',
+                            user_ids=config.admins,
+                            keyboard=await create_keyboard('to_menu')
+                        )
+                        await ans(
+                            'Что-то пошло не так.\n'
+                            'Попробуй повторить тоже самое через некоторое время, либо свяжись с администратором.',
+                            keyboard=await create_keyboard('to_menu')
+                        )
+                else:
+                    await ans(
+                        'Почему-то ты ввел значение отличающееся от баланса.\n'
+                        'Введи, пожалуйста, цифру, которая меньше, либо равна твоему балансу.',
+                        keyboard=await create_keyboard('edit')
+                    )
             else:
                 await ans(
-                    'Почему-то ты ввел значение отличающееся от баланса.\n'
-                    'Введи, пожалуйста, цифру, которая меньше, либо равна твоему балансу.',
+                    'Твой баланс меньше 10 руб.\n'
+                    'Так что сори. Как нибудь в другой раз(На самом деле тогда, когда у тебя баланс будет больше'
+                    ' 10 руб.)',
                     keyboard=await create_keyboard('edit')
                 )
         else:
             await ans(
-                'Твой баланс меньше 10 руб.\n'
-                'Так что сори. Как нибудь в другой раз(На самом деле тогда, когда у тебя баланс будет больше'
-                ' 10 руб.)',
+                'Ты ввел число меньше 10.\n'
+                'Введи число больше 10.',
                 keyboard=await create_keyboard('edit')
             )
     else:
