@@ -2,6 +2,8 @@ import asyncio
 import re
 import string
 
+from vkbottle.framework.framework.rule import VBMLRule
+
 import comments
 import config
 import random
@@ -11,7 +13,7 @@ import transactions
 from vkbottle import Bot, Message, User
 from vkbottle.api.keyboard import keyboard_gen
 from vkbottle.keyboard import Text, Keyboard
-from vkbottle.branch import ExitBranch
+from vkbottle.branch import ExitBranch, rule_disposal
 
 bot = Bot(config.token)
 user = User(config.acces_token)
@@ -235,7 +237,7 @@ async def create_keyboard(text=None, user_id=None):
         keyboard.add_button(Text('Помощь'), color='negative')
         if user_id in config.admins:
             keyboard.add_row()
-            keyboard.add_button(Text('Admin panel🔒'), color='primary')
+            keyboard.add_button(Text('Admin panel'), color='primary')
         return keyboard.generate()
     elif text == 'профиль':
         # _, nickname, _, qiwi_number, _ = await get_profile(user_id)
@@ -262,14 +264,14 @@ async def create_keyboard(text=None, user_id=None):
         keyboard.add_row()
         keyboard.add_button(Text('Меню'), color='negative')
         return keyboard.generate()
-    elif text == 'admin panel🔒' and user_id in config.admins:
+    elif text == 'admin panel' and user_id in config.admins:
         keyboard.add_row()
-        keyboard.add_button(Text('Добавить розыгрыш', payload='add_raffle'), color='primary')
+        keyboard.add_button(Text('Добавить розыгрыш'), color='primary')
         keyboard.add_row()
         keyboard.add_button(Text('Рассылка'), color='primary')
         keyboard.add_row()
         keyboard.add_button(Text('Информация о пользователях'), color='primary')
-        keyboard.add_row()
+        return keyboard.generate()
 
 
 @bot.on.message()
@@ -463,7 +465,7 @@ async def payBalance2(ans: Message):
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
-        return
+        return ExitBranch()
     if ans.text.isdigit() and int(ans.text) >= 10:
         await ans(
             f'Ты хочешь пополнить свой баланс на {ans.text} руб?\n'
@@ -495,7 +497,7 @@ async def payBalance3(ans: Message, amount):
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
-        return
+        return ExitBranch()
     elif ans.text.lower() == 'отменить':
         billId, _ = await forTransaction(tableName, 'pull')
         await qiwi.reject(billId)
@@ -506,8 +508,8 @@ async def payBalance3(ans: Message, amount):
         await ans('Произвожу выход в меню.')
         await bot.branch.exit(ans.peer_id)
         await asyncio.sleep(1)
-        await menu()
-        return
+        await menu(ans)
+        return ExitBranch()
     elif ans.text.lower() == 'проверить':
         billId, _ = await forTransaction(tableName, 'pull')
         status = await qiwi.status(billId)
@@ -677,7 +679,7 @@ async def branchEditNumber(ans: Message):
             keyboard=await create_keyboard('edit')
         )
         await bot.branch.exit(ans.peer_id)
-        return
+        return ExitBranch()
     else:
         await ans(
             'Номер невалидный!\nНомер должен:\n•Содержать только цифры и начинаться на 7(без +)\n•Длина 11 цифр.',
@@ -687,11 +689,11 @@ async def branchEditNumber(ans: Message):
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
-        return
+        return ExitBranch()
     if ans.text.lower() == 'профиль':
         await bot.branch.exit(ans.peer_id)
         await profile(ans)
-        return
+        return ExitBranch()
 
 
 @bot.on.message_handler(text='добавить/изменить никнейм', lower=True)
@@ -711,17 +713,18 @@ async def branchEditNickname(ans: Message):
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
-        return
+        return ExitBranch
     if ans.text.lower() == 'профиль':
         await bot.branch.exit(ans.peer_id)
         await profile(ans)
-        return
+        return ExitBranch()
     await editProfile(ans.from_id, ans.text, 'nickname')
     await ans(
         'Ваш никнейм успешно сменен!\nТеперь можешь обратно вернуться в свой профиль.',
         keyboard=await create_keyboard('edit')
     )
     await bot.branch.exit(ans.peer_id)
+    return ExitBranch()
 
 
 @bot.on.message_handler(text='связаться', lower=True)
@@ -774,6 +777,29 @@ async def activeRaffles(ans: Message):
                 inline=True
             )
         )
+    else:
+        for raffle in activeList:
+            raffleId, prize, count, _, _ = raffle
+            bought = await boughtTicket(raffleId)
+            payload = f'[_active_:_{raffleId}_]'
+            payload = payload.replace('_', '\"').replace('[', '{').replace(']', '}')
+            await ans(
+                f'--Розыгрыш №{raffleId}--\n'
+                f'Призовой фонд: {prize}\n'
+                f'Стоимость 1 тикета: {int(prize / count)} руб\n'
+                f'Куплено тикетов {bought} из {count}.',
+                keyboard=keyboard_gen(
+                    [
+                        [{'text': 'Участвовать', 'color': 'positive', 'payload': payload}]
+                    ],
+                    inline=True
+                )
+            )
+        await ans(
+            'Увы.\n'
+            'Список активных розыгрышей закончился.',
+            keyboard=await create_keyboard('to_menu')
+        )
 
 
 @bot.on.message_handler(text='участвовать', lower=True)
@@ -804,7 +830,7 @@ async def buyTickets(ans: Message, raffleId):
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
-        return
+        return ExitBranch()
     bought = await countTicket(raffleId) - await boughtTicket(raffleId)
     if ans.text.isdigit():
         if bought >= int(ans.text) > 0:
@@ -933,12 +959,81 @@ async def passRaffles(ans: Message):
         )
 
 
-@bot.on.message_handler(text='admin panel🔒', lower=True)
+@bot.on.message_handler(text='admin panel', lower=True)
 async def adminPanel(ans: Message):
-    await ans(
-        'Ведется разработка🛠',
-        keyboard=await create_keyboard('to_menu')
-    )
+    if ans.from_id in config.admins:
+        await ans(
+            'Твоя админка тебя приветсвует.\n'
+            'Держи свой штурвал.',
+            keyboard=await create_keyboard(ans.text.lower(), ans.from_id)
+        )
+    else:
+        await ans(
+            'Кыш отсюда.',
+            keyboard=await create_keyboard('to_menu')
+        )
+
+
+@bot.on.message_handler(text='добавить розыгрыш', lower=True)
+async def addRaffle(ans: Message):
+    if ans.from_id in config.admins:
+        await ans(
+            'Add raffle. Now!\n'
+            'Добавить розыгрыш можно так:\n'
+            '<Призовой фонд:int> <Кол-во тикетов для покупки:int>',
+            keyboard=await create_keyboard('to_menu')
+        )
+        await bot.branch.add(ans.peer_id, 'addRaffle')
+    else:
+        await ans(
+            'Ты что здесь забыл?\n'
+            'У тебя нет прав...',
+            keyboard=await create_keyboard('to_menu')
+        )
+
+
+@bot.branch.simple_branch('addRaffle')
+async def addingRaffle(ans: Message):
+    if ans.text.lower() == 'меню':
+        await bot.branch.exit(ans.peer_id)
+        await menu(ans)
+        return ExitBranch()
+    priceTicket = ans.text.split()
+    if len(priceTicket) == 2 and all([price.isdigit() for price in priceTicket]):
+        price = float(priceTicket[0]) / float(priceTicket[1])
+        if float(price) == int(float(price)):  # Проверяет, является ли число целым
+            conn = await aiosqlite.connect('Database/database.db')
+            cursor = await conn.cursor()
+            await cursor.executescript(f'INSERT INTO Raffles (prize, count_tickets)'
+                                       f' VALUES ({int(priceTicket[0])}, {int(priceTicket[1])})')
+            await conn.commit()
+            await cursor.execute('SELECT seq FROM sqlite_sequence')
+            raffleId = await cursor.fetchone()
+            await cursor.execute(f'CREATE TABLE \'Raffle_{raffleId[0]}\' ('
+                                 f'ticket INTEGER,'
+                                 f'user_id INTEGER,'
+                                 f'PRIMARY KEY (ticket AUTOINCREMENT )'
+                                 f');')
+            await cursor.close()
+            await ans(
+                'Розыгрыш добавлен!\n'
+                'Можешь идти в меню.',
+                keyboard=await create_keyboard('to_menu')
+            )
+        else:
+            await ans(
+                'Ты походу ввел не те числа.\n'
+                'Повтори матешу, а потом повтори ввод.\n'
+                'Дам подсказку: первое число должно нацело делиться на второе.\n'
+                'Давай без косяков, плез..',
+                keyboard=await create_keyboard('to_menu')
+            )
+    else:
+        await ans(
+            'Ты слишком сильно накосячил.\n'
+            'Введи, плез, 2 числа(<Призовой фонд:int> и <кол-во тикетов:int>).',
+            keyboard=await create_keyboard('to_menu')
+        )
 
 
 bot.run_polling(skip_updates=False)
