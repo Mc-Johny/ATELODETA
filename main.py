@@ -2,7 +2,7 @@ import asyncio
 import re
 import string
 
-from vkbottle.framework.framework.rule import VBMLRule
+from pydantic import ValidationError
 
 import comments
 import config
@@ -10,14 +10,18 @@ import random
 import messages
 import aiosqlite
 import transactions
-from vkbottle import Bot, Message, User
+from vkbottle import Bot, Message, User, VKError
 from vkbottle.api.keyboard import keyboard_gen
 from vkbottle.keyboard import Text, Keyboard
-from vkbottle.branch import ExitBranch, rule_disposal
+from vkbottle.branch import ExitBranch
 
 bot = Bot(config.token)
 user = User(config.acces_token)
 qiwi = transactions.Qiwi()
+
+
+def getRandomId():
+    return random.randint(0, 10000000)
 
 
 async def check_or_register_user(user_id: int):
@@ -214,6 +218,15 @@ async def checkBalance(user_id):
     return res[0]
 
 
+async def getAllUsers():
+    conn = await aiosqlite.connect('Database/database.db')
+    cursor = await conn.cursor()
+    await cursor.execute('SELECT * FROM Users')
+    res = await cursor.fetchall()
+    await cursor.close()
+    return [user_id[0] for user_id in res if user_id[0] not in config.admins]
+
+
 async def create_keyboard(text=None, user_id=None):
     keyboard = Keyboard(one_time=True, inline=False)
     if text == 'help':
@@ -221,6 +234,7 @@ async def create_keyboard(text=None, user_id=None):
         keyboard.add_button(Text('Помощь'), color='negative')
         return keyboard.generate()
     elif text == 'to_menu':
+        keyboard = Keyboard(one_time=False, inline=True)
         keyboard.add_row()
         keyboard.add_button(Text('Меню'), color='negative')
         return keyboard.generate()
@@ -461,7 +475,7 @@ async def payBalance1(ans: Message):
 
 
 @bot.branch.simple_branch('Balance')
-async def payBalance2(ans: Message):
+async def branchPayBalance1(ans: Message):
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
@@ -492,7 +506,7 @@ async def payBalance2(ans: Message):
 
 
 @bot.branch.simple_branch('payBalance')
-async def payBalance3(ans: Message, amount):
+async def branchPayBalance2(ans: Message, amount):
     tableName = f'transaction_{ans.peer_id}'
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
@@ -826,7 +840,7 @@ async def takePart(ans: Message):
 
 
 @bot.branch.simple_branch('buyTickets')
-async def buyTickets(ans: Message, raffleId):
+async def branchBuyTickets(ans: Message, raffleId):
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
@@ -993,7 +1007,7 @@ async def addRaffle(ans: Message):
 
 
 @bot.branch.simple_branch('addRaffle')
-async def addingRaffle(ans: Message):
+async def branchAddingRaffle(ans: Message):
     if ans.text.lower() == 'меню':
         await bot.branch.exit(ans.peer_id)
         await menu(ans)
@@ -1032,6 +1046,52 @@ async def addingRaffle(ans: Message):
         await ans(
             'Ты слишком сильно накосячил.\n'
             'Введи, плез, 2 числа(<Призовой фонд:int> и <кол-во тикетов:int>).',
+            keyboard=await create_keyboard('to_menu')
+        )
+
+
+@bot.on.message_handler(text='рассылка', lower=True)
+async def mailing(ans: Message):
+    if ans.from_id in config.admins:
+        await ans(
+            'Введи текст, который отправится всем юзерам сия группы.\n'
+            'Пиши текст разборчиво, и без ашибок. Окей?'
+        )
+        await bot.branch.add(ans.peer_id, 'mailing')
+    else:
+        await ans(
+            'Ты попал не туда, сударь.\n'
+            'Возвращайся в меню.',
+            keyboard=await create_keyboard('to_menu')
+        )
+
+
+@bot.branch.simple_branch('mailing')
+async def branchMailing(ans: Message):
+    allUsers = await getAllUsers()
+    splitUsers = lambda user_ids, size: [user_ids[i:i + size] for i in range(0, len(user_ids), size)]
+    try:
+        try:
+            for users in splitUsers(allUsers, 55):
+                await bot.api.messages.send(
+                    message=f'--Рассылка--\n'
+                            f'{ans.text}',
+                    user_ids=users,
+                    random_id=getRandomId(),
+                    keyboard=await create_keyboard('to_menu')
+                )
+            await ans(
+                'Рассылка не прошла..',
+                keyboard=await create_keyboard('to_menu')
+            )
+        except ValidationError:
+            await ans(
+                'Случилась хрень с random_id, но ничего, рассылка прошла.',
+                keyboard=await create_keyboard('to_menu')
+            )
+    except VKError:
+        await ans(
+            'Рассылка не прошла..',
             keyboard=await create_keyboard('to_menu')
         )
 
