@@ -572,7 +572,7 @@ async def branchPayBalance2(ans: Message, amount):
         )
     else:
         if not await checkTable(tableName):
-            await payBalance2(ans)
+            await branchPayBalance1(ans)
         if await checkTable(tableName):
             await ans(
                 f'Что такое этот ваш {ans.text}?\n'
@@ -888,8 +888,7 @@ async def branchBuyTickets(ans: Message, raffleId):
                     user.api.wall.post(
                         owner_id=config.group_id,
                         from_group=1,
-                        message=f'Только что {winnernickname} стал победителем розыгрыша!\n'
-                                f''
+                        message=random.choice(messages.win).replace('WINNER', f'[id{winner}|{winnernickname}]')
                     )
             else:
                 await ans(
