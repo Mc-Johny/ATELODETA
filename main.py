@@ -284,7 +284,7 @@ async def create_keyboard(text=None, user_id=None):
         keyboard.add_row()
         keyboard.add_button(Text('Рассылка'), color='primary')
         keyboard.add_row()
-        keyboard.add_button(Text('Информация о пользователях'), color='primary')
+        keyboard.add_button(Text('Информация о пользователе(ях)'), color='primary')
         return keyboard.generate()
 
 
@@ -1068,6 +1068,10 @@ async def mailing(ans: Message):
 
 @bot.branch.simple_branch('mailing')
 async def branchMailing(ans: Message):
+    if ans.text.lower() == 'меню':
+        await bot.branch.exit(ans.peer_id)
+        await menu(ans)
+        return ExitBranch()
     allUsers = await getAllUsers()
     splitUsers = lambda user_ids, size: [user_ids[i:i + size] for i in range(0, len(user_ids), size)]
     try:
@@ -1092,6 +1096,47 @@ async def branchMailing(ans: Message):
     except VKError:
         await ans(
             'Рассылка не прошла..',
+            keyboard=await create_keyboard('to_menu')
+        )
+
+
+@bot.on.message_handler(text='информация о пользователе(ях)', lower=True)
+async def usersInfo(ans: Message):
+    await ans(
+        'Кидай сюда ссылки пользователей.\n'
+        'Между ссылками должны быть запятые, либо пробел. Учти это!',
+        keyboard=await create_keyboard('to_menu')
+    )
+    await bot.branch.add(ans.peer_id, 'usersInfo')
+
+
+@bot.branch.simple_branch('usersInfo')
+async def branchUsersInfo(ans: Message):
+    if ans.text.lower() == 'меню':
+        await bot.branch.exit(ans.peer_id)
+        await menu(ans)
+        return ExitBranch()
+    usersLinks = ans.text.replace(',', ' ').replace('https://vk.com/', '').split()
+    try:
+        users = await bot.api.users.get(', '.join(usersLinks))
+        for customer in users:
+            balance, nickname, buy_ticket, qiwi_number, wins = await get_profile(customer.id)
+            await ans(
+                f'Имя и фамилия: [id{customer.id}|{customer.first_name} {customer.last_name}]\n'
+                f'Баланс: {balance} руб\n'
+                f'Никнейм: {nickname}\n'
+                f'Куплено тикетов: {buy_ticket}\n'
+                f'Номер QIWI: {qiwi_number}\n'
+                f'Кол-во побед: {wins}'
+            )
+        await ans(
+            f'На этом все, Одмен.',
+            keyboard=await create_keyboard('to_menu')
+        )
+    except VKError:
+        await ans(
+            'Ты указал невалидные ссылки, мусье.\n'
+            'Повтори ввод.',
             keyboard=await create_keyboard('to_menu')
         )
 
