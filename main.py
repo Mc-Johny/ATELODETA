@@ -416,7 +416,10 @@ async def message(ans: Message):
                     keyboard=await create_keyboard('to_menu')
                 )
     except TypeError:
-        pass
+        await ans(
+            'Что-то пошло не так...😶',
+            keyboard=await create_keyboard('to_menu')
+        )
     await check_or_register_user(ans.from_id)
 
 
@@ -635,11 +638,12 @@ async def branchPayOut(ans: Message, balance, number):
                                 keyboard=await create_keyboard('to_menu')
                             )
                     except KeyError:
-                        await ans(
-                            f'У [id{ans.from_id}|пользователя] случилась проблемка.\n'
-                            f'Вот ответ сервера:\n{res}',
+                        await bot.api.messages.send(
+                            message=f'У [id{ans.from_id}|пользователя] случилась проблемка.\n'
+                                    f'Вот ответ сервера:\n{res}',
                             user_ids=config.admins,
-                            keyboard=await create_keyboard('to_menu')
+                            keyboard=await create_keyboard('to_menu'),
+                            random_id=getRandomId()
                         )
                         await ans(
                             'Что-то пошло не так.\n'
@@ -871,12 +875,14 @@ async def branchBuyTickets(ans: Message, raffleId):
                         winnernickname = str(name[0].first_name) + ' ' + str(name[0].last_name)
                     else:
                         winnernickname = winnernickname[0]
-                    await ans(
+                    await bot.api.messages.send(
                         f'Розыгрыш №{raffleId} завершен!\n'
                         f'Победителем стал {winnernickname}. Его тикет под номером {ticketId}'
                         f' стал выигрышным.\n'
                         f'💸💸💸💸💸💸💸💸',
-                        user_ids=await usersWinRaffle(raffleId, winner)
+                        user_ids=await usersWinRaffle(raffleId, winner),
+                        keyboard=await create_keyboard('to_menu'),
+                        random_id=getRandomId()
                     )
                     await ans(
                         'Прими мои поздравления!\n'
