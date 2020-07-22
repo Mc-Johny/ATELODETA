@@ -285,6 +285,8 @@ async def create_keyboard(text=None, user_id=None):
         keyboard.add_button(Text('Рассылка'), color='primary')
         keyboard.add_row()
         keyboard.add_button(Text('Информация о пользователе(ях)'), color='primary')
+        keyboard.add_row()
+        keyboard.add_button(Text('Меню'), color='negative')
         return keyboard.generate()
 
 
