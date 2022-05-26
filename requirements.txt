@@ -14,7 +14,7 @@ Pillow-SIMD==7.0.0.post3
 pydantic==1.5.1
 pytz==2020.1
 requests==2.23.0
-ujson==2.0.3
+ujson==5.2.0
 urllib3==1.25.9
 uuid==1.30
 vbml==0.5.93
